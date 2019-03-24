@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+
+from convert_from_string import convert_from_string
+
 import datetime
 import argparse
 
@@ -35,8 +38,11 @@ class PLaywithargparse:
 			self.parser.add_argument("-v", "--verbose",
 				help="option to Stream logging to STDOUT", action ="store_true")
 
-			self.parser.add_argument("-x", "--x_args", help="value for x", type=int)
-			self.parser.add_argument("-y","--y_args", help="value for y", type=int)
+			self.parser.add_argument("-x", "--x_args", help="value for x", 
+				type=convert_from_string)
+			
+			self.parser.add_argument("-y","--y_args", help="value for y", 
+				type=convert_from_string)
 
 			self.args = self.parser.parse_args()
 
