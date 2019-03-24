@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 import datetime
 import argparse
 
@@ -88,7 +89,7 @@ class PLaywithargparse:
 			self.x = None
 			self.y = None
 
-			if self.args.x_args:
+			if self.args.x_args is not None:
 				self.x = self.args.x_args
 
 			else:
@@ -96,7 +97,7 @@ class PLaywithargparse:
 
 
 
-			if self.args.y_args:
+			if self.args.y_args is not None:
 				self.y = self.args.y_args
 
 			else: 
@@ -138,9 +139,9 @@ class PLaywithargparse:
 
 			self.result = self.x + self.y
 
-			print("The result of adding {} + {} is {}".format(self.x, self.y, self.result))
+			# print("The result of adding {} + {} is {}".format(self.x, self.y, self.result))
 
-			# print(f"The result of adding {self.x} + {self.y} is {self.result}")
+			print(f"The result of adding {self.x} + {self.y} is {self.result}")
 
 
 
@@ -174,8 +175,10 @@ class PLaywithargparse:
 
 			 
 		else:
-			print("The result of dividing {}: by :{} is {}\n".format(self.x, self.y,
-				self.result))
+			print("The result of dividing {}: by :{} is {}\n".format
+				(self.x, self.y, self.result))
+
+			# print(f"The result of dividing {self.x}: by :{self.y} is {self.result}\n")
 
  
 
