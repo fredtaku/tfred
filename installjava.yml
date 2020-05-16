@@ -1,0 +1,72 @@
+---
+
+- hosts: all
+
+
+  gather_facts: True
+  remote_user: centos
+  become: yes
+
+
+
+
+  tasks:
+
+
+
+        - name: create /java directory
+          file:
+             path: /java
+             state: directory
+             
+
+
+
+        - name: Copy file with owner and permissions
+          copy:
+            src: /home/tfred/ansible/jdk-8u251-linux-x64.tar.gz
+            dest: /java
+            owner: centos
+            group: centos
+            mode: '0775'
+
+
+        - name: Unarchive a file that is already on the remote machine
+          unarchive:
+            src: /java/jdk-8u251-linux-x64.tar.gz
+            
+            dest: /java
+            remote_src: yes
+
+
+        - name: Create a symbolic link
+          file:
+            src: /java/jdk1.8.0_251
+            dest: /java/java8
+            owner: centos
+            group: centos
+            state: link
+
+
+
+        - name: Make java   an alternative with high priority
+          alternatives:
+            name: java
+            path: /java/java8/bin/java
+            link: /usr/bin/java
+            priority: 50000
+
+
+        - name: add spark binaries to $PATH
+          blockinfile:
+            path: /etc/profile.d/additional_path_file.sh
+            state: present
+            mode: "0775"
+            create: yes
+            block: |
+                      #!/bin/bash
+                      export PATH=$PATH:/java/java8/bin/
+                      export JAVA_HOME=/Java/java8/
+
+
+

@@ -1,0 +1,155 @@
+---
+
+- hosts: us-east-2
+
+  become: yes
+  remote_user: centos
+  vars_files:
+      - my_vars.yml
+  
+  tasks:
+
+    
+
+
+        - name: Create hadoop group
+          group:
+            name: "{{hadoop_group}}"
+            state: present
+
+        - name: Create hadoop user
+          user:
+            name: "{{hadoop_user}}"
+            group: "{{hadoop_group}}"
+            password: "{{ hadoop_user_passwd | password_hash('sha512') }}"
+
+
+
+        - name: copy ssh key files to .ssh of hadoop user
+          copy:
+            src: "{{item}}"
+            dest: "{{ hadoop_ssh_dir }}"
+
+          with_items:
+           - "{{public_key_path}}"
+           - "{{private_key_path}}"
+
+        - name: Set authorized key for passwordless ssh hadoop user
+          authorized_key:
+            user: hadoop
+            state: present
+            key: "{{ lookup('file', public_key_path) }}"
+            manage_dir: True
+
+
+
+          
+        - name: upgrade all packages
+          yum:
+            name: '*'
+            state: latest
+
+
+        - name: Add hadoop user to sudoers file and validate
+          lineinfile:
+            path: /etc/sudoers
+            state: present
+            insertafter: '^root ALL='
+            line: 'hadoop ALL=(ALL) NOPASSWD: ALL'
+
+
+
+
+
+        - name: Make sure firewalld service is stopped
+          systemd:
+            state: stopped
+            enabled: no
+            name: firewalld
+
+          ignore_errors: True
+
+
+        - name: copy ssh key files to .ssh of root user
+          copy:
+            src: "{{item}}"
+            dest: /root/.ssh/
+
+          with_items:
+           - "{{public_key_path}}"
+           - "{{private_key_path}}"
+
+        - name: Set authorized key for passwordless ssh for root  user
+          authorized_key:
+            user: root
+            state: present
+            key: "{{ lookup('file', public_key_path) }}"
+            manage_dir: True
+
+
+        - name: Change /root/.ssh files ownership, group and permissions
+          file:
+            path: "/root/.ssh/{{item}}"
+            owner: root
+            group: root
+            mode: '0600'
+
+          loop:
+            - "id_rsa"
+            - "id_rsa.pub"
+    
+
+
+
+
+
+
+
+- hosts: all
+
+  become: yes
+  remote_user: centos
+  
+  vars_files:
+      - my_vars.yml
+
+
+  tasks: 
+
+
+
+
+        - name: Transfer cloudera-manager.repo from  nameNode to us-east servers
+          synchronize:
+                src: /etc/yum.repos.d/cloudera-manager.repo
+                dest: /etc/yum.repos.d/cloudera-manager.repo
+          delegate_to: nameNode
+
+
+
+
+        - name: Transfer cloudera-cdh5.repo from  nameNode to us-east servers
+          synchronize:
+                src: /etc/yum.repos.d/cloudera-cdh5.repo
+                dest: /etc/yum.repos.d/cloudera-cdh5.repo
+          delegate_to: nameNode
+
+
+
+        - name: ensure oracle-j2sdk1.7  and java mysql connector is installed
+          yum:
+            name: "{{mypackages}}"
+          vars:
+            mypackages:
+               - "oracle-j2sdk1.7"
+               - " mysql-connector-java" 
+
+          when: inventory_hostname in groups["us-east-2"]
+
+
+
+        - name: Display Hostname of NEW HOST
+          debug: 
+            var: "{{ansible_fqdn}}"
+              
+          when: inventory_hostname in groups['us-east-2'] 
