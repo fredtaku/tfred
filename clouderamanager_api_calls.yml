@@ -1,0 +1,35 @@
+---
+
+- hosts: nameNode
+  gather_facts: no
+  become: yes
+
+  remote_user: centos
+
+
+  tasks:
+
+
+
+        - name: Check that you can connect (GET) to cloudera manager home page
+          uri:
+                url: http://18.217.197.106:7180/api/v19/hosts?view=SUMMARY
+                url_password: 'admin'
+                url_username: 'admin'
+          register: summary
+
+        - debug:
+            var: summary
+
+        - name: INSTALL CLOUDERA CM COMPONENTS ON NEW HOSTS
+          uri:
+                url: http://18.217.197.106:7180/api/v19/cm/commands/hostInstall
+                url_password: 'admin'
+                url_username: 'admin'
+                method: 'POST'
+               
+                body: "{{ lookup('file','issue.json') }}"
+
+                force_basic_auth: yes
+                status_code: 200
+                body_format: json

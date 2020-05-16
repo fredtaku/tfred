@@ -1,0 +1,373 @@
+---
+
+- hosts: all
+
+  become: yes
+  remote_user: centos
+
+  vars_files:
+      - my_vars.yml
+
+  
+  tasks:
+
+
+
+        - name: Template hostfile for dfs include
+          template:
+            src: templ2.j2
+            dest: "{{hadoop_dir}}/hostfile"
+            owner: hadoop
+            group: hadoop
+
+          when: inventory_hostname == "nameNode"
+
+
+
+
+        - name: get the hostname of name_node and set it to a variable
+          set_fact:
+            name_node: "{{ansible_facts['fqdn']}}"
+
+
+          when: inventory_hostname == "nameNode"
+
+
+
+
+
+        - name: configure hdfs-site.xml to add dfs.hosts
+          blockinfile:
+           
+            path: "{{hadoop_home}}/etc/hadoop/hdfs-site.xml"
+            state: present
+            mode: "0775"
+            create: yes
+            insertafter: "<configuration>"
+            block: |
+
+
+                <property>
+                <name>dfs.hosts</name>
+                <value>{{hadoop_dir}}/hostfile</value>
+                </property>
+
+
+          when: inventory_hostname == "nameNode"
+
+
+
+
+
+
+
+
+
+- hosts: new_nodes
+
+  become: yes
+  remote_user: centos
+
+  vars_files:
+      - my_vars.yml
+
+  
+
+  tasks:
+
+
+
+        - name: Create hadoop group
+          group:
+            name: "{{hadoop_group}}"
+            state: present
+
+        - name: Create hadoop user
+          user:
+            name: "{{hadoop_user}}"
+            group: "{{hadoop_group}}"
+            password: "{{ hadoop_user_passwd | password_hash('sha512') }}"
+
+
+
+        - name: copy ssh key files to .ssh of hadoop user
+          copy:
+            src: "{{item}}"
+            dest: "{{ hadoop_ssh_dir }}"
+
+          with_items:
+           - "{{public_key_path}}"
+           - "{{private_key_path}}"
+
+        - name: Set authorized key for passwordless ssh hadoop user
+          authorized_key:
+            user: hadoop
+            state: present
+            key: "{{ lookup('file', public_key_path) }}"
+            manage_dir: True
+
+
+
+        - name: create mount point for new file system for hadoop data/namenode dir
+          file:
+            path: "{{hadoop_dir}}"
+            state: directory
+            mode: 0755
+            owner: "{{ hadoop_user }}"
+            group: "{{ hadoop_group }}"
+
+        - name: Create xfs filesystem on /dev/nvme1n1
+          filesystem:
+            fstype: xfs
+            dev: "{{device_path}}"
+
+        - name: mount /dev/nvme1n1 on hadoop_dir
+          mount:
+            path: "{{hadoop_dir}}"
+            src: "{{device_path}}"
+            fstype: xfs
+            state: mounted
+
+        - name: upgrade all packages
+          yum:
+            name: '*'
+            state: latest
+
+
+        - name: install extra packages for linux repo
+          yum:
+            name: epel-release
+            state: latest
+
+        - name: install java 11 open jdk and development packages
+          yum:
+            name: java-11-openjdk-devel
+            state: latest
+
+
+        - name: Add hadoop user to sudoers file and validate
+          lineinfile:
+            path: /etc/sudoers
+            state: present
+            insertafter: '^root ALL='
+            line: 'hadoop ALL=(ALL) NOPASSWD: ALL'
+            validate: '/usr/sbin/visudo -cf %s'
+
+
+        - name: add java bin path to $PATH
+          blockinfile:
+            path: /etc/profile.d/additional_paths.sh
+            state: present
+            mode: "0775"
+            create: yes
+            block: |
+                      #!/bin/bash
+                      export PATH=$PATH:/usr/lib/jvm/java-11-openjdk-11.0.6.10-1.el7_7.x86_64/bin/
+                      export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-11.0.6.10-1.el7_7.x86_64/
+                      export HADOOP_HOME=/hadoop_dir/hadoop
+
+
+
+
+
+
+        - name: Download hadoop 3
+          get_url:
+            url: "{{hadoop_download_url}}"
+            dest: "{{hadoop_dir}}"
+            
+        - name: Unarchive the hadoop tarball that is already on the remote machine
+          unarchive:
+            src: "{{hadoop_dir}}/hadoop-3.2.1.tar.gz"
+            dest: "{{hadoop_dir}}"
+            remote_src: yes
+
+
+        - name:
+          file:
+            
+            src: "{{hadoop_dir}}/hadoop-3.2.1"
+            dest: "{{hadoop_dir}}/hadoop"
+            owner: hadoop
+            group: hadoop
+            state: link
+
+
+
+        - name: Create namenode directory 
+          file:
+            path: "{{hadoop_dir}}/namenode_dir"
+            state: directory
+            mode: '0755'
+
+
+
+
+        - name: Create datanode directory 
+          file:
+            path: "{{hadoop_dir}}/datanode_dir"
+            state: directory
+            mode: '0755'
+
+
+
+
+
+
+
+
+        - name: configure core-site.xml 
+          blockinfile:
+           
+            path: "{{hadoop_home}}/etc/hadoop/core-site.xml"
+            state: present
+            mode: "0775"
+            create: yes
+            insertafter: "<configuration>"
+            block: |
+
+
+                <property>
+                <name>fs.defaultFS </name>
+                <value>hdfs://{{hostvars['nameNode'].name_node}}:8020</value>
+
+                </property>
+
+
+
+
+        - name: configure hdfs-site.xml 
+          blockinfile:
+           
+            path: "{{hadoop_home}}/etc/hadoop/hdfs-site.xml"
+            state: present
+            mode: "0775"
+            create: yes
+            insertafter: "<configuration>"
+            block: |
+
+
+                <property>
+                <name>dfs.namenode.name.dir </name>
+                <value>file:{{hadoop_dir}}/namenode_dir</value>
+                </property>
+
+
+                <property>
+                <name>dfs.datanode.data.dir </name>
+                <value>file:{{hadoop_dir}}/datanode_dir</value>
+                </property>
+
+
+
+
+
+        - name: configure mapred-site.xml 
+          blockinfile:
+           
+            path: "{{hadoop_home}}/etc/hadoop/mapred-site.xml"
+            state: present
+            mode: "0775"
+            create: yes
+            insertafter: "<configuration>"
+            block: |
+
+
+
+
+                <property>
+                <name>mapreduce.framework.name</name>
+                <value>yarn</value>
+                </property>
+
+
+
+
+        - name: configure yarn-site.xml 
+          blockinfile:
+           
+            path: "{{hadoop_home}}/etc/hadoop/yarn-site.xml"
+            state: present
+            mode: "0775"
+            create: yes
+            insertafter: "<configuration>"
+
+            block: |
+
+
+
+                <property>
+                <name>yarn.resourcemanager.address </name>
+                <value>{{hostvars['nameNode'].name_node}}:8050</value>
+                </property>
+
+
+
+                <property>
+                <name>yarn.resourcemanager.scheduler.address</name>
+                <value>{{hostvars['nameNode'].name_node}}:8030</value>
+                </property>
+
+
+                <property>
+                <name>yarn.nodemanager.aux-services</name>
+                <value>mapreduce_shuffle</value>
+                </property>
+
+
+
+                <property>
+                <name>yarn.nodemanager.aux-services.mapreduce.shuffle.class</name>
+                <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+                </property>
+
+
+
+
+                <property>
+                <name>yarn.nodemanager.disk-health-checker.min-healthy-disks</name>
+                <value>0</value>
+                </property>
+
+
+
+
+
+        - name: add hadoop binaries to $PATH
+          blockinfile:
+            path: /etc/profile.d/additional_path_file.sh
+            state: present
+            mode: "0775"
+            create: yes
+            block: |
+                      #!/bin/bash
+                      export PATH=$PATH:/hadoop_dir/hadoop/bin:/hadoop_dir/hadoop/sbin/:
+
+
+        - name: Recursively change ownership of directory /hadoop_dir
+          file:
+            path: "{{hadoop_dir}}"
+            state: directory
+            recurse: yes
+            owner: hadoop
+            group: hadoop
+
+
+
+        - name: Recursively change ownership of directory /home/hadoop
+          file:
+            path: /home/hadoop
+            state: directory
+            recurse: yes
+            owner: hadoop
+            group: hadoop
+
+
+        - name: Change permissions on /home/hadoop/.ssh
+          shell: /bin/chmod 0600 /home/hadoop/.ssh/{{item}}
+          loop:
+            - "id_rsa"
+            - "id_rsa.pub"
+
+
+

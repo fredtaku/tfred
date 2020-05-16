@@ -1,0 +1,479 @@
+---
+
+- hosts: all
+
+  become: yes
+  remote_user: centos
+
+  vars_files:
+      - my_vars.yml
+
+  
+  tasks:
+
+        - name: get the hostname of name_node and set it to a variable
+          set_fact:
+            name_node: "{{ansible_facts['fqdn']}}"
+
+          when: inventory_hostname == "nameNode"
+          register: HN
+
+
+
+
+
+
+        - name: Create hadoop group
+          group:
+            name: "{{hadoop_group}}"
+            state: present
+
+        - name: Create hadoop user
+          user:
+            name: "{{hadoop_user}}"
+            group: "{{hadoop_group}}"
+            password: "{{ hadoop_user_passwd | password_hash('sha512') }}"
+
+
+
+        - name: copy ssh key files to .ssh of hadoop user
+          copy:
+            src: "{{item}}"
+            dest: "{{ hadoop_ssh_dir }}"
+
+          with_items:
+           - "{{public_key_path}}"
+           - "{{private_key_path}}"
+
+        - name: Set authorized key for passwordless ssh hadoop user
+          authorized_key:
+            user: hadoop
+            state: present
+            key: "{{ lookup('file', public_key_path) }}"
+            manage_dir: True
+
+
+
+        - name: create mount point for new file system for hadoop data/namenode dir
+          file:
+            path: "{{hadoop_dir}}"
+            state: directory
+            mode: 0755
+            owner: "{{ hadoop_user }}"
+            group: "{{ hadoop_group }}"
+
+        - name: Create xfs filesystem on /dev/xvdb
+          filesystem:
+            fstype: xfs
+            dev: "{{device_path}}"
+
+        - name: mount /dev/xvdb on hadoop_dir
+          mount:
+            path: "{{hadoop_dir}}"
+            src: "{{device_path}}"
+            fstype: xfs
+            state: mounted
+
+        - name: upgrade all packages
+          yum:
+            name: '*'
+            state: latest
+
+
+        - name: install extra packages for linux repo
+          yum:
+            name: epel-release
+            state: latest
+
+        - name: create /java directory
+          file:
+             path: /java
+             state: directory
+             
+
+             owner: "{{ hadoop_user }}"
+             group: "{{ hadoop_group }}"
+
+
+        - name: Copy file with owner and permissions
+          copy:
+            src: /home/tfred/ansible/jdk-8u251-linux-x64.tar.gz
+            dest: /java
+            owner: hadoop
+            group: hadoop
+            mode: '0775'
+
+
+        - name: Unarchive a file that is already on the remote machine
+          unarchive:
+            src: /java/jdk-8u251-linux-x64.tar.gz
+            
+            dest: /java
+            remote_src: yes
+
+
+        - name: Create a symbolic link
+          file:
+            src: /java/jdk1.8.0_251
+            dest: /java/java8
+            owner: centos
+            group: centos
+            state: link
+
+
+
+        - name: Make java   an alternative with high priority
+          alternatives:
+            name: java
+            path: /java/java8/bin/java
+            link: /usr/bin/java
+            priority: 50000
+
+
+
+
+        - name: Add hadoop user to sudoers file and validate
+          lineinfile:
+            path: /etc/sudoers
+            state: present
+            insertafter: '^root ALL='
+            line: 'hadoop ALL=(ALL) NOPASSWD: ALL'
+            validate: '/usr/sbin/visudo -cf %s'
+
+
+
+
+
+
+        - name: Download hadoop 3
+          get_url:
+            url: "{{hadoop_download_url}}"
+            dest: "{{hadoop_dir}}"
+            
+        - name: Unarchive the hadoop tarball that is already on the remote machine
+          unarchive:
+            src: "{{hadoop_dir}}/hadoop-3.2.1.tar.gz"
+            dest: "{{hadoop_dir}}"
+            remote_src: yes
+
+
+        - name: create a link for hadoop
+          file:
+            
+            src: "{{hadoop_dir}}/hadoop-3.2.1"
+            dest: "{{hadoop_dir}}/hadoop"
+            owner: hadoop
+            group: hadoop
+            state: link
+
+
+
+        - name: Create namenode directory 
+          file:
+            path: "{{hadoop_dir}}/namenode_dir"
+            state: directory
+            mode: '0755'
+
+
+
+
+        - name: Create datanode directory 
+          file:
+            path: "{{hadoop_dir}}/datanode_dir"
+            state: directory
+            mode: '0755'
+
+
+
+
+
+        - name: Template a file to etc/hadoop/workers in name_node only
+          template:
+            src: templ.j2
+            dest: "{{hadoop_home}}/etc/hadoop/workers"
+            owner: hadoop
+            group: hadoop
+
+          when: inventory_hostname == "nameNode"
+
+
+
+        - name: configure core-site.xml 
+          blockinfile:
+           
+            path: "{{hadoop_home}}/etc/hadoop/core-site.xml"
+            state: present
+            mode: "0775"
+            create: yes
+            insertafter: "<configuration>"
+            block: |
+
+
+                <property>
+                <name>fs.defaultFS </name>
+                <value>hdfs://{{hostvars['nameNode'].name_node}}:8020</value>
+
+                </property>
+
+
+
+
+        - name: configure hdfs-site.xml 
+          blockinfile:
+           
+            path: "{{hadoop_home}}/etc/hadoop/hdfs-site.xml"
+            state: present
+            mode: "0775"
+            create: yes
+            insertafter: "<configuration>"
+            block: |
+
+
+                <property>
+                <name>dfs.namenode.name.dir </name>
+                <value>file:{{hadoop_dir}}/namenode_dir</value>
+                </property>
+
+
+                <property>
+                <name>dfs.datanode.data.dir </name>
+                <value>file:{{hadoop_dir}}/datanode_dir</value>
+                </property>
+
+
+                <property>
+                <name>dfs.replication</name>
+                <value>3</value>
+                </property>
+
+
+
+
+
+        - name: configure mapred-site.xml 
+          blockinfile:
+           
+            path: "{{hadoop_home}}/etc/hadoop/mapred-site.xml"
+            state: present
+            mode: "0775"
+            create: yes
+            insertafter: "<configuration>"
+            block: |
+
+
+
+
+                <property>
+                <name>mapreduce.framework.name</name>
+                <value>yarn</value>
+                </property>
+
+
+
+
+        - name: configure yarn-site.xml 
+          blockinfile:
+           
+            path: "{{hadoop_home}}/etc/hadoop/yarn-site.xml"
+            state: present
+            mode: "0775"
+            create: yes
+            insertafter: "<configuration>"
+
+            block: |
+
+
+
+                <property>
+                <name>yarn.resourcemanager.address </name>
+                <value>{{hostvars['nameNode'].name_node}}:8050</value>
+                </property>
+
+
+
+                <property>
+                <name>yarn.resourcemanager.scheduler.address</name>
+                <value>{{hostvars['nameNode'].name_node}}:8030</value>
+                </property>
+
+
+                <property>
+                <name>yarn.resourcemanager.webapp.address</name>
+                <value>{{hostvars['nameNode'].name_node}}:8088</value>
+                </property>
+
+                <property>
+                <name>yarn.resourcemanager.resource-tracker.address</name>
+                <value>{{hostvars['nameNode'].name_node}}:8031</value>
+                </property>
+
+
+                <property>
+                <name>yarn.resourcemanager.admin.address</name>
+                <value>{{hostvars['nameNode'].name_node}}:8033</value>
+                </property>
+
+
+                <property>
+                <name>yarn.nodemanager.aux-services</name>
+                <value>mapreduce_shuffle</value>
+                </property>
+
+
+
+                <property>
+                <name>yarn.nodemanager.aux-services.mapreduce.shuffle.class</name>
+                <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+                </property>
+
+
+
+
+                <property>
+                <name>yarn.nodemanager.disk-health-checker.min-healthy-disks</name>
+                <value>0</value>
+                </property>
+
+
+
+
+
+        - name: add hadoop binaries to $PATH
+          blockinfile:
+            path: /etc/profile.d/additional_path_file.sh
+            state: present
+            mode: "0775"
+            create: yes
+            block: |
+                      #!/bin/bash
+                      export PATH=$PATH:/hadoop_dir/hadoop/bin:/hadoop_dir/hadoop/sbin/:
+
+
+        - name: Recursively change ownership of directory /hadoop_dir
+          file:
+            path: "{{hadoop_dir}}"
+            state: directory
+            recurse: yes
+            owner: hadoop
+            group: hadoop
+
+
+
+        - name: Recursively change ownership of directory /home/hadoop
+          file:
+            path: /home/hadoop
+            state: directory
+            recurse: yes
+            owner: hadoop
+            group: hadoop
+
+
+        - name: Change permissions on /home/hadoop/.ssh
+          shell: /bin/chmod 0600 /home/hadoop/.ssh/{{item}}
+          loop:
+            - "id_rsa"
+            - "id_rsa.pub"
+
+
+        - name: create spark home directory
+          file:
+            path: "{{spark_dir}}"
+            state: directory
+            mode: 0755
+            owner: "{{ hadoop_user }}"
+            group: "{{ hadoop_group }}"
+
+
+
+        - name: Download spark
+          get_url:
+            url: "{{spark_download_url}}"
+            dest: "{{spark_dir}}"
+
+
+        - name: Unarchive the spark tarball
+          unarchive:
+            src: "{{spark_dir}}/spark-3.0.0-preview2-bin-hadoop3.2.tgz"
+            dest: "{{spark_dir}}"
+            remote_src: yes
+
+
+
+
+
+        - name: create a link for spark
+          file:
+            
+            src: "{{spark_dir}}/spark-3.0.0-preview2-bin-hadoop3.2"
+            dest: "{{spark_dir}}/spark"
+            owner: hadoop
+            group: hadoop
+            state: link
+
+
+
+        - name: add spark binaries to $PATH
+          blockinfile:
+            path: /etc/profile.d/additional_path_file.sh
+            state: present
+            mode: "0775"
+            create: yes
+            block: |
+                      #!/bin/bash
+                      export PATH=$PATH:/usr/local/spark/spark/bin:/usr/local/spark/spark/sbin:/hadoop_dir/hadoop/bin:/hadoop_dir/hadoop/sbin:/usr/bin:/java/java8/bin:
+                      export SPARK_HOME=/usr/local/spark/spark/
+                      export HADOOP_CONF_DIR=/hadoop_dir/hadoop/etc/hadoop
+                      export LD_LIBRARY_PATH=/hadoop_dir/hadoop/lib/native:$LD_LIBRARY_PATH
+                      export JAVA_HOME=/java/java8
+                      export HADOOP_HOME=/hadoop_dir/hadoop
+
+
+        - name: Change the spark defaults configuration file
+          shell: mv "{{spark_home}}/conf/spark-defaults.conf.template" "{{spark_home}}/conf/spark-defaults.conf"
+
+
+
+        - name: add spark to yarn
+          blockinfile:
+            path: "{{spark_home}}/conf/spark-defaults.conf"
+            block: |
+                     spark.master   yarn
+                     spark.driver.memory    512m
+                     spark.executor.memory    512m
+  
+        - name: install zip and unzip
+          yum:
+            name: "{{item}}"
+            state: latest
+
+          loop:
+            - "zip"
+            - "unzip"
+
+
+
+        - name: create data directory for example data
+          file:
+            path: "{{hadoop_user_home_dir_data}}"
+            state: directory
+            mode: 0755
+            owner: "{{ hadoop_user }}"
+            group: "{{ hadoop_group }}"
+
+
+
+        - name: Download https://github.com/dgadiraju/data/archive/master.zip
+          get_url:
+            url: "{{data_url}}"
+            dest: "{{hadoop_user_home_dir_data}}"
+
+
+
+
+        - name: unzip the downloaded file
+          shell:
+            cmd: unzip data-master.zip
+            chdir: "{{hadoop_user_home_dir_data}}"
+
+
+

@@ -1,0 +1,565 @@
+---
+
+- hosts: nameNode
+
+  become: yes
+  remote_user: centos
+  
+  vars_files:
+      - my_vars.yml
+  vars:
+        privileges:
+                - 'scm.*:ALL'
+                - 'hive.*:ALL'
+                - 'oozie.*:ALL'
+                - 'hue.*:ALL'
+                - 'reportmanager.*:ALL'
+        users: 
+                - "scm"
+                - "hive"
+                - "oozie"
+                - "hue"
+                - "rm"
+  tasks:
+
+
+
+
+        - name: Create hadoop group
+          group:
+            name: "{{hadoop_group}}"
+            state: present
+
+        - name: Create hadoop user
+          user:
+            name: "{{hadoop_user}}"
+            group: "{{hadoop_group}}"
+            password: "{{ hadoop_user_passwd | password_hash('sha512') }}"
+
+
+
+        - name: copy ssh key files to .ssh of hadoop user
+          copy:
+            src: "{{item}}"
+            dest: "{{ hadoop_ssh_dir }}"
+
+          with_items:
+           - "{{public_key_path}}"
+           - "{{private_key_path}}"
+
+        - name: Set authorized key for passwordless ssh hadoop user
+          authorized_key:
+            user: hadoop
+            state: present
+            key: "{{ lookup('file', public_key_path) }}"
+            manage_dir: True
+
+
+
+          
+        - name: upgrade all packages
+          yum:
+            name: '*'
+            state: latest
+
+
+
+
+
+
+        - name: Add hadoop user to sudoers file and validate
+          lineinfile:
+            path: /etc/sudoers
+            state: present
+            insertafter: '^root ALL='
+            line: 'hadoop ALL=(ALL) NOPASSWD: ALL'
+            validate: '/usr/sbin/visudo -cf %s'
+
+
+
+
+        - name: ensure a list of packages installed
+          yum:
+            name: "{{ packages }}"
+          vars:
+            packages:
+            - httpd
+            - wget 
+            - yum-utils
+            - createrepo 
+            - firewalld 
+            - mariadb
+            - mariadb-server 
+            - MySQL-python
+            - vim
+
+
+        - name: Make sure firewalld service is stopped
+          systemd:
+            state: stopped
+            enabled: no
+            name: firewalld
+
+
+
+        - name: Make sure httpd service is running
+          systemd:
+            state: started
+            enabled: yes
+            name: httpd
+
+
+
+
+
+
+        - name: open port 7180
+          firewalld:
+            port: 7180/tcp
+            permanent: yes
+            state: enabled
+
+
+        - name: Add yum cloudera repository 
+          yum_repository:
+            name: cloudera-manager
+            description: cloudera repo
+            file: cloudera-manager
+            baseurl: https://archive.cloudera.com/cm5/redhat/7/x86_64/cm/5/
+            gpgkey: https://archive.cloudera.com/cm5/redhat/7/x86_64/cm/RPM-GPG-KEY-cloudera
+            state: present
+            gpgcheck: yes 
+            enabled: yes 
+
+
+
+
+
+        - name: Create a directory for yum rpm files
+          file:
+            path: /var/www/html/cm5/redhat/7/x86_64/cm/5/
+            state: directory
+
+
+        - name: Change the working directory /var/www/html and run yum reposync command
+          shell: reposync -r cloudera-manager
+          args:
+            chdir: /var/www/html
+
+
+        - name: Copy all the rpm files in RPMS to /var/www/html/cm5/redhat/7/x86_64/cm/5/
+          copy:
+            src: /var/www/html/cloudera-manager/RPMS
+            remote_src: yes
+            dest: /var/www/html/cm5/redhat/7/x86_64/cm/5/
+
+
+        - name: wget the yum GPG keys file
+          shell: wget https://archive.cloudera.com/cm5/redhat/7/x86_64/cm/RPM-GPG-KEY-cloudera
+          args:
+            chdir: /var/www/html/cm5/redhat/7/x86_64/cm/
+
+
+
+        - name: Template a file to /etc/yum.repos.d/cloudera-manager.repo
+          template:
+            src: yum_cloudera_template.j2
+            dest: /etc/yum.repos.d/cloudera-manager.repo
+
+
+        - name: run createrepo for yum metadata
+          shell: createrepo .
+          args:
+            chdir: /var/www/html/cm5/redhat/7/x86_64/cm/5/
+
+
+
+        - name: run yum clean all
+          shell: yum clean all
+
+
+        - name: run yum clean metadate
+          shell: yum clean metadata
+
+
+        - name: add directory listings to httpd apache
+          blockinfile:
+           
+            path: /etc/httpd/conf/httpd.conf
+            state: present
+            mode: "0775"
+            create: yes
+            insertafter: "Options Indexes"
+
+            block: |
+
+                    Options Indexes FollowSymLinks MultiViews
+                    AllowOverride None
+                    Require all granted
+
+
+
+
+        - name: Make sure to restart httpd service
+          systemd:
+            state: restarted
+            enabled: yes
+            name: httpd
+
+
+
+
+        - name: Add yum cloudera repository 
+          yum_repository:
+            name: cloudera-cdh5
+            description: cloudera-cdh5
+            file: cloudera-cdh5
+            baseurl: https://archive.cloudera.com/cdh5/redhat/7/x86_64/cdh/5
+            gpgkey: https://archive.cloudera.com/cdh5/redhat/7/x86_64/cdh/RPM-GPG-KEY-cloudera
+            state: present
+            gpgcheck: yes 
+            enabled: yes 
+
+
+
+
+
+        - name: Create a directory for yum cdh rpm files
+          file:
+            path: /var/www/html/cdh5/redhat/7/x86_64/cdh/5
+            state: directory
+
+
+        - name: Change the working directory /var/www/html and run yum reposync command
+          shell: reposync -r cloudera-cdh5
+          args:
+            chdir: /var/www/html
+
+
+        - name: Copy all the rpm files in RPMS to/var/www/html/cdh5/redhat/7/x86_64/cdh/
+          copy:
+            src: /var/www/html/cloudera-cdh5/RPMS
+            remote_src: yes
+            dest: /var/www/html/cdh5/redhat/7/x86_64/cdh/5
+
+
+        - name: wget the yum GPG keys file
+          shell: wget https://archive.cloudera.com/cdh5/redhat/7/x86_64/cdh/RPM-GPG-KEY-cloudera
+          args:
+            chdir: /var/www/html/cdh5/redhat/7/x86_64/cdh/
+
+
+
+        - name: Template a file to /etc/yum.repos.d/cloudera-cdh-repo.repo
+          template:
+            src: cdh_cloudera_template.j2
+            dest: /etc/yum.repos.d/cloudera-cdh5.repo
+
+
+        - name: run createrepo for cdh yum metadata
+          shell: createrepo .
+          args:
+            chdir: /var/www/html/cdh5/redhat/7/x86_64/cdh/5
+
+
+        - name: Make sure to restart httpd service
+          systemd:
+            state: restarted
+            enabled: yes
+            name: httpd
+
+
+        - name: run yum clean all
+          shell: yum clean all
+
+
+        - name: run yum clean metadate
+
+          shell: yum clean metadata
+
+
+        - name: ensure oracle-j2sdk1.7 is installed
+          yum:
+            name: "{{mypackages}}"
+          vars:
+            mypackages:
+               - "oracle-j2sdk1.7"
+               - " mysql-connector-java" 
+
+        - name: Make sure mysqld service is running
+          systemd:
+            state: started
+            name: mariadb
+            enabled: yes 
+
+
+        - name: mysql set root user password
+          mysql_user:
+            name: root
+            password: taku991140530
+            check_implicit_admin: yes
+            state: present
+
+            login_password: taku991140530
+            login_user: root
+
+        - name: Create mysql root password file 
+          blockinfile:
+            path: /root/.my.cnf
+            create: yes
+            block: |
+                 [client]
+                 user=root
+                 password=taku991140530
+
+
+        - name: Create new databases 
+          mysql_db:
+            name:
+                 - "scm"
+                 - "hive"
+                 - "oozie"
+                 - "hue"
+                 - "reportmanager"
+            state: present
+
+
+        - name: Create mysql users with privileges on above Databases
+          mysql_user:
+            name: "{{item.0}}"
+            password: taku991140530
+            state: present
+            priv: "{{item.1}}"
+          with_together:
+            - "{{users}}"
+            - "{{privileges}}" 
+
+        - name: Install Cloudera Manager
+          yum:
+            name: cloudera-manager-server
+            state: latest
+
+        - name: stop cloudera manager server
+          systemd:
+            state: stopped
+            enabled: yes
+            name: cloudera-scm-server
+
+
+
+
+        - name: Run Cloudera shell mysql access database script
+          shell: /usr/share/cmf/schema/scm_prepare_database.sh mysql -h localhost scm root taku991140530
+
+        - name: turn cloudera manager server back on
+          systemd:
+            state: started 
+            enabled: yes
+            name: cloudera-scm-server
+
+
+        - name: turn on mariadb server - mysql on
+          systemd:
+            state: started 
+            enabled: yes
+            name: mariadb
+
+
+
+
+- hosts: all
+  become: yes
+  remote_user: centos
+
+  vars_files:
+      - my_vars.yml
+
+  tasks:
+
+
+        - name: copy ssh key files to .ssh of root user
+          copy:
+            src: "{{item}}"
+            dest: /root/.ssh/
+
+          with_items:
+           - "{{public_key_path}}"
+           - "{{private_key_path}}"
+
+        - name: Set authorized key for passwordless ssh for root  user
+          authorized_key:
+            user: root
+            state: present
+            key: "{{ lookup('file', public_key_path) }}"
+            manage_dir: True
+
+
+        - name: Change /root/.ssh files ownership, group and permissions
+          file:
+            path: "/root/.ssh/{{item}}"
+            owner: root
+            group: root
+            mode: '0600'
+
+          loop:
+            - "id_rsa"
+            - "id_rsa.pub"
+    
+
+
+
+
+- hosts: all
+
+  become: yes
+  remote_user: centos
+  
+  vars_files:
+      - my_vars.yml
+  vars:
+        privileges:
+                - 'scm.*:ALL'
+                - 'hive.*:ALL'
+                - 'oozie.*:ALL'
+                - 'hue.*:ALL'
+                - 'reportmanager.*:ALL'
+        users: 
+                - "scm"
+                - "hive"
+                - "oozie"
+                - "hue"
+                - "rm"
+  tasks:
+
+
+
+
+        - name: Create hadoop group
+          group:
+            name: "{{hadoop_group}}"
+            state: present
+
+        - name: Create hadoop user
+          user:
+            name: "{{hadoop_user}}"
+            group: "{{hadoop_group}}"
+            password: "{{ hadoop_user_passwd | password_hash('sha512') }}"
+
+          when: inventory_hostname in groups["us-east-2"]
+
+
+        - name: copy ssh key files to .ssh of hadoop user
+          copy:
+            src: "{{item}}"
+            dest: "{{ hadoop_ssh_dir }}"
+
+          with_items:
+           - "{{public_key_path}}"
+           - "{{private_key_path}}"
+
+          when: inventory_hostname in groups["us-east-2"]
+
+        - name: Set authorized key for passwordless ssh hadoop user
+          authorized_key:
+            user: hadoop
+            state: present
+            key: "{{ lookup('file', public_key_path) }}"
+            manage_dir: True
+
+          when: inventory_hostname in groups["us-east-2"]
+
+
+          
+        - name: upgrade all packages
+          yum:
+            name: '*'
+            state: latest
+
+          when: inventory_hostname in groups["us-east-2"]
+
+
+
+
+
+        - name: Add hadoop user to sudoers file and validate
+          lineinfile:
+            path: /etc/sudoers
+            state: present
+            insertafter: '^root ALL='
+            line: 'hadoop ALL=(ALL) NOPASSWD: ALL'
+            validate: '/usr/sbin/visudo -cf %s'
+
+          when: inventory_hostname in groups["us-east-2"]
+
+
+
+        - name: ensure a list of packages installed
+          yum:
+            name: "{{ packages }}"
+          vars:
+            packages:
+            - httpd
+            - wget 
+            - yum-utils
+            - createrepo 
+            - firewalld 
+            - mariadb
+            - mariadb-server 
+            - MySQL-python
+            - vim
+
+          when: inventory_hostname in groups["us-east-2"]
+
+        - name: Make sure firewalld service is stopped
+          systemd:
+            state: stopped
+            enabled: no
+            name: firewalld
+
+          when: inventory_hostname in groups["us-east-2"]
+
+        - name: Transfer cloudera-manager.repo from  nameNode to us-east servers
+          synchronize:
+                src: /etc/yum.repos.d/cloudera-manager.repo
+                dest: /etc/yum.repos.d/cloudera-manager.repo
+          delegate_to: nameNode
+
+
+
+
+
+        - name: Transfer cloudera-cdh5.repo from  nameNode to us-east servers
+          synchronize:
+                src: /etc/yum.repos.d/cloudera-cdh5.repo
+                dest: /etc/yum.repos.d/cloudera-cdh5.repo
+          delegate_to: nameNode
+
+
+
+        - name: ensure oracle-j2sdk1.7  and java mysql connector is installed
+          yum:
+            name: "{{mypackages}}"
+          vars:
+            mypackages:
+               - "oracle-j2sdk1.7"
+               - " mysql-connector-java" 
+
+          when: inventory_hostname in groups["us-east-2"]
+
+
+
+
+
+        - name: Template a file to /etc/servers_fqdn
+          template:
+            src: servers_fqdns.j2
+            dest: /etc/servers_fqdn
+       
+
+        - name: Template a file to /etc/servers_ips
+          template:
+            src: servers_ips.j2
+            dest: /etc/servers_ips
+
+
+        - debug: var=ansible_default_ipv4.address

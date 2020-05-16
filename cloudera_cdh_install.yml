@@ -1,0 +1,123 @@
+---
+
+- hosts: all
+
+  become: yes
+  remote_user: centos
+  
+
+  tasks:
+
+
+          
+        - name: ensure a list of packages installed
+          yum:
+            name: "{{ packages }}"
+          vars:
+            packages:
+            - httpd
+            - wget 
+            - yum-utils
+            - createrepo 
+            - firewalld 
+            - vim
+
+
+        - name: Make sure firewalld service is running
+          systemd:
+            state: started
+            enabled: yes
+            name: firewalld
+
+
+
+
+        - name: Make sure httpd service is running
+          systemd:
+            state: started
+            enabled: yes
+            name: httpd
+
+
+
+        - name: Make sure  port 80 is opened 
+          firewalld:
+            service: http
+            permanent: yes
+            state: enabled
+
+
+
+        - name: open port 7180
+          firewalld:
+            port: 7180/tcp
+            permanent: yes
+            state: enabled
+
+
+        - name: Add yum cloudera repository 
+          yum_repository:
+            name: cloudera-cdh5
+            description: cloudera-cdh5
+            file: cloudera-cdh5
+            baseurl: https://archive.cloudera.com/cdh5/redhat/7/x86_64/cdh/5
+            gpgkey: https://archive.cloudera.com/cdh5/redhat/7/x86_64/cdh/RPM-GPG-KEY-cloudera
+            state: present
+            gpgcheck: yes 
+            enabled: yes 
+
+
+
+
+
+        - name: Create a directory for yum cdh rpm files
+          file:
+            path: /var/www/html/cdh5/redhat/7/x86_64/cdh/5
+            state: directory
+
+
+        - name: Change the working directory /var/www/html and run yum reposync command
+          shell: reposync -r cloudera-cdh5
+          args:
+            chdir: /var/www/html
+
+
+        - name: Copy all the rpm files in RPMS to/var/www/html/cdh5/redhat/7/x86_64/cdh/
+          copy:
+            src: /var/www/html/cloudera-cdh5/RPMS
+            remote_src: yes
+            dest: /var/www/html/cdh5/redhat/7/x86_64/cdh/5
+
+
+        - name: wget the yum GPG keys file
+          shell: wget https://archive.cloudera.com/cdh5/redhat/7/x86_64/cdh/RPM-GPG-KEY-cloudera
+          args:
+            chdir: /var/www/html/cdh5/redhat/7/x86_64/cdh/
+
+
+
+        - name: Template a file to /etc/yum.repos.d/cloudera-cdh-repo.repo
+          template:
+            src: cdh_cloudera_template.j2
+            dest: /etc/yum.repos.d/cloudera-cdh5
+
+
+        - name: run createrepo for cdh yum metadata
+          shell: createrepo .
+          args:
+            chdir: /var/www/html/cdh5/redhat/7/x86_64/cdh/5
+
+
+        - name: Make sure to restart httpd service
+          systemd:
+            state: restarted
+            enabled: yes
+            name: httpd
+
+
+        - name: run yum clean all
+          shell: yum clean all
+
+
+        - name: run yum clean metadate
+          shell: yum clean metadata
