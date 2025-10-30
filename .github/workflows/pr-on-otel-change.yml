@@ -1,0 +1,40 @@
+# .github/workflows/pr-on-otel-change.yml
+name: PR to production on otel* changes
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  push:
+    branches:
+      - test                 # listen only on the 'test' branch
+    paths:
+      - 'otel*'              # top-level files starting with "otel"
+      - '**/otel*'           # or anywhere in the repo
+
+jobs:
+  open-pr:
+    # Safety: don’t try to PR if we’re already on production
+    if: ${{ github.ref != 'refs/heads/production' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create PR from current branch to production (no temp branch)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Skip if a PR from this branch to production already exists
+          if gh pr view --head "${{ github.ref_name }}" --base production >/dev/null 2>&1; then
+            echo "PR already exists from ${{ github.ref_name }} to production. Skipping."
+            exit 0
+          fi
+
+          gh pr create \
+            --base production \
+            --head "${{ github.ref_name }}" \
+            --title "Auto PR: otel* changes from '${{ github.ref_name }}' to production" \
+            --body "Automatically opened because a push containing files starting with 'otel' occurred on '${{ github.ref_name }}'."
