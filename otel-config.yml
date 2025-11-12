@@ -1,2 +1,50 @@
-test data
-test data 2
+receivers:
+  otlp:
+    protocols:
+      grpc: {}
+      http: {}
+processors:
+  batch: {}
+  resource:
+    attributes:
+    - key: LOB
+      value: 100A7G1
+      action: upsert
+    - key: environment
+      value: dev
+      action: upsert
+exporters:
+  splunk_hec:
+    token: <YOUR_SPLUNK_HEC_TOKEN>
+    endpoint: Error! Hyperlink reference not valid.
+    source: Splunk Team
+    sourcetype: _json
+    index: sim_metrics
+    tls:
+      insecure_skip_verify: true
+service:
+  pipelines:
+    traces:
+      receivers:
+      - otlp
+      processors:
+      - batch
+      - resource
+      exporters:
+      - splunk_hec
+    metrics:
+      receivers:
+      - otlp
+      processors:
+      - batch
+      - resource
+      exporters:
+      - splunk_hec
+    logs:
+      receivers:
+      - otlp
+      processors:
+      - batch
+      - resource
+      exporters:
+      - splunk_hec
